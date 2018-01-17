@@ -1,26 +1,14 @@
 import numpy as np
+import pandas as pd
 import statsmodels.api as sm
 from sys import stdout
+from scipy.stats import norm
 from sklearn.mixture import BayesianGaussianMixture as BGM
 from sklearn.model_selection import KFold
 from sklearn.externals.joblib import Parallel, delayed
 from tick.preprocessing.features_binarizer import FeaturesBinarizer
 from tick.inference import CoxRegression
 from tick.preprocessing.utils import safe_array
-
-
-def _all_safe(features: np.ndarray, times: np.array,
-              censoring: np.array):
-    if not set(np.unique(censoring)).issubset({0, 1}):
-        raise ValueError('``censoring`` must only have values in {0, 1}')
-    # All times must be positive
-    if not np.all(times >= 0):
-        raise ValueError('``times`` array must contain only non-negative '
-                         'entries')
-    features = safe_array(features)
-    times = safe_array(times)
-    censoring = safe_array(censoring, np.ushort)
-    return features, times, censoring
 
 
 def compute_score(learner, features, features_binarized, times, censoring,
@@ -31,18 +19,12 @@ def compute_score(learner, features, features_binarized, times, censoring,
                              censoring, blocks_start, blocks_length, boundaries,
                              n_folds=n_folds, shuffle=shuffle, C=C,
                              scoring=scoring, n_jobs=n_jobs, verbose=verbose)
-    scores = np.array(scores)
-    train_scores = scores[:, 0]
-    test_scores = scores[:, 1]
-    train_score_mean = train_scores.mean()
-    train_score_std = train_scores.std()
-    test_score_mean = test_scores.mean()
-    test_score_std = test_scores.std()
+    scores_mean = scores.mean()
+    scores_std = scores.std()
     if verbose:
-        print("\n%s: train %0.3f (+/- %0.3f), test %0.3f (+/- %0.3f)" %
-              (scoring, train_score_mean, 2 * train_score_std, test_score_mean,
-               2 * test_score_std))
-    return train_score_mean, train_score_std, test_score_mean, test_score_std
+        print("\n%s: score %0.3f (+/- %0.3f)" % (
+            scoring, scores_mean, scores_std))
+    return scores_mean, scores_std
 
 
 def cross_val_score(learner, features, features_binarized, times, censoring,
@@ -58,7 +40,7 @@ def cross_val_score(learner, features, features_binarized, times, censoring,
                                censoring, blocks_start, blocks_length,
                                boundaries, idx_train, idx_test, scoring)
         for (idx_train, idx_test) in cv_iter)
-    return scores
+    return np.array(scores)
 
 
 def fit_and_score(learner, features, features_bin, times, censoring,
@@ -72,8 +54,7 @@ def fit_and_score(learner, features, features_bin, times, censoring,
     learner.fit(X_train, Y_train, delta_train)
 
     if scoring == 'log_lik':
-        train_score = learner.score(X_train, Y_train, delta_train)
-        test_score = learner.score(X_test, Y_test, delta_test)
+        score = learner.score(X_test, Y_test, delta_test)
     elif scoring == 'log_lik_refit':
         coeffs = learner.coeffs
         cut_points_estimates = {}
@@ -111,36 +92,99 @@ def fit_and_score(learner, features, features_bin, times, censoring,
         X_test = binarized_features[idx_test]
 
         solver = 'agd'
-        learner = CoxRegression(tol=1e-5, solver=solver, verbose=False,
-                                penalty='none')
-        learner.fit(X_train, Y_train, delta_train)
-        train_score = learner.score(X_train, Y_train, delta_train)
-        test_score = learner.score(X_test, Y_test, delta_test)
+        learner_final = CoxRegression(tol=1e-5, solver=solver, verbose=False,
+                                      penalty='none')
+        learner_final.fit(X_train, Y_train, delta_train)
+        score = learner_final.score(X_test, Y_test, delta_test)
 
     else:
         raise ValueError("scoring ``%s`` not implemented, "
                          "try using 'log_lik' instead" % scoring)
 
-    return train_score, test_score
+    return score
 
 
-def get_p_value(feature, val, times, censoring):
-    feature_bin = feature <= val
-    mod = sm.PHReg(endog=times, status=censoring, exog=feature_bin,
-                   ties="efron")
-    fitted_model = mod.fit()
-    p_value = fitted_model.pvalues[0]
-
-    return p_value
+def get_m_1(hat_K_star, K_star, n_features):
+    return (1 / n_features) * np.linalg.norm(hat_K_star - K_star, ord=1)
 
 
-def auto_cutoff(feature, times, censoring, epsilon=25):
-    feature, times, censoring = _all_safe(feature, times, censoring)
+def get_m_2(cut_points_estimates, cut_points):
+    m_2 = 0
+    n_features = len(cut_points)
+    for j in range(n_features):
+        mu_star_j = cut_points[str(j)][1:-1]
+        hat_mu_star_j = cut_points_estimates[str(j)][1:-1]
+        m_2 += get_H(mu_star_j, hat_mu_star_j)
+
+    return (1 / n_features) * m_2
+
+
+def get_H(A, B):
+    return max(get_E(A, B), get_E(B, A))
+
+
+def get_E(A, B):
+    return max([min([abs(a - b) for a in A]) for b in B])
+
+
+def get_p_values_j(feature, mu_jk, times, censoring, epsilon=10):
     q1 = np.percentile(feature, epsilon)
     q3 = np.percentile(feature, 100 - epsilon)
-    values_to_test = feature[np.where((feature <= q3) & (feature >= q1))]
-    p_values = Parallel(n_jobs=-1)(delayed(get_p_value)(feature, val,
-                                                        times, censoring)
-                                   for val in values_to_test)
+    values_to_test = mu_jk[np.where((mu_jk <= q3) & (mu_jk >= q1))]
+    p_values = []
+    for val in values_to_test:
+        feature_bin = feature <= val
+        mod = sm.PHReg(endog=times, status=censoring, exog=feature_bin,
+                       ties="efron")
+        fitted_model = mod.fit()
+        p_values.append(fitted_model.pvalues[0])
 
-    return p_values, values_to_test
+    p_values_j = pd.DataFrame({'values_to_test': values_to_test,
+                               'p_values': p_values})
+    p_values_j.sort_values('values_to_test', inplace=True)
+
+    return p_values_j
+
+
+def auto_cutoff(X, boundaries, Y, delta):
+    p_values = Parallel(n_jobs=8)(
+        delayed(get_p_values_j)(X[:, j], boundaries[str(j)].copy()[1:-1], Y,
+                                delta)
+        for j in range(X.shape[1]))
+
+    return p_values
+
+
+def t_ij(i, j, n):
+    return (1 - i * (n - j) / ((n - i) * j)) ** .5
+
+
+def d_ij(i, j, z, n):
+    return (2 / np.pi) ** .5 * norm.pdf(z) * (
+        t_ij(i, j, n) - (z ** 2 / 4 - 1) * t_ij(i, j, n) ** 3 / 6)
+
+
+def p_value_cut(p_values, values_to_test, feature, epsilon=10):
+    n_tested = p_values.size
+    p_value_min = np.min(p_values)
+    l = np.zeros(n_tested)
+    l[-1] = n_tested
+    D = np.zeros(n_tested - 1)
+    z = norm.ppf(1 - p_value_min / 2)
+    values_to_test_sorted = np.sort(values_to_test)
+
+    epsilon /= 100
+    p_corrected_1 = norm.pdf(1 - p_value_min / 2) * (z - 1 / z) * np.log(
+        (1 - epsilon) ** 2 / epsilon ** 2) + 4 * norm.pdf(z) / z
+
+    for i in np.arange(n_tested - 1):
+        l[i] = np.count_nonzero(feature <= values_to_test_sorted[i])
+        if i >= 1:
+            D[i - 1] = d_ij(l[i - 1], l[i], z, feature.shape[0])
+    p_corrected_2 = p_value_min + np.sum(D)
+
+    p_corrected = np.min((p_corrected_1, p_corrected_2, 1))
+    if np.isnan(p_corrected) or np.isinf(p_corrected):
+        p_corrected = p_value_min
+
+    return p_corrected

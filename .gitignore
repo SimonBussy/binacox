@@ -3,5 +3,4 @@
 # except gitignore, htaccess and htpasswd
 !.gitignore
 
-backup
 __pycache__
