@@ -108,10 +108,10 @@ def get_m_1(hat_K_star, K_star, n_features):
     return (1 / n_features) * np.linalg.norm(hat_K_star - K_star, ord=1)
 
 
-def get_m_2(cut_points_estimates, cut_points):
+def get_m_2(cut_points_estimates, cut_points, S):
     m_2 = 0
     n_features = len(cut_points)
-    for j in range(n_features):
+    for j in set(range(n_features)) - set(S):
         mu_star_j = cut_points[str(j)][1:-1]
         hat_mu_star_j = cut_points_estimates[str(j)][1:-1]
         m_2 += get_H(mu_star_j, hat_mu_star_j)
@@ -127,32 +127,41 @@ def get_E(A, B):
     return max([min([abs(a - b) for a in A]) for b in B])
 
 
-def get_p_values_j(feature, mu_jk, times, censoring, epsilon=10):
-    q1 = np.percentile(feature, epsilon)
-    q3 = np.percentile(feature, 100 - epsilon)
-    values_to_test = mu_jk[np.where((mu_jk <= q3) & (mu_jk >= q1))]
-    p_values = []
+def get_p_values_j(feature, mu_k, times, censoring, values_to_test, epsilon=10):
+    if values_to_test is None:
+        p1 = np.percentile(feature, epsilon)
+        p2 = np.percentile(feature, 100 - epsilon)
+        values_to_test = mu_k[np.where((mu_k <= p2) & (mu_k >= p1))]
+    p_values, t_values = [], []
     for val in values_to_test:
         feature_bin = feature <= val
         mod = sm.PHReg(endog=times, status=censoring, exog=feature_bin,
                        ties="efron")
         fitted_model = mod.fit()
         p_values.append(fitted_model.pvalues[0])
-
-    p_values_j = pd.DataFrame({'values_to_test': values_to_test,
-                               'p_values': p_values})
-    p_values_j.sort_values('values_to_test', inplace=True)
-
-    return p_values_j
-
-
-def auto_cutoff(X, boundaries, Y, delta):
-    p_values = Parallel(n_jobs=8)(
-        delayed(get_p_values_j)(X[:, j], boundaries[str(j)].copy()[1:-1], Y,
-                                delta)
-        for j in range(X.shape[1]))
+        t_values.append(fitted_model.tvalues[0])
+    p_values = pd.DataFrame({'values_to_test': values_to_test,
+                             'p_values': p_values,
+                             't_values': t_values})
+    p_values.sort_values('values_to_test', inplace=True)
 
     return p_values
+
+
+def auto_cutoff(X, boundaries, Y, delta, values_to_test=None,
+                features_names=None):
+    if values_to_test is None:
+        values_to_test = X.shape[1] * [None]
+    if features_names is None:
+        features_names = [str(j) for j in range(X.shape[1])]
+    X = np.array(X)
+    result = Parallel(n_jobs=8)(
+        delayed(get_p_values_j)(X[:, j],
+                                boundaries[features_names[j]].copy()[1:-1], Y,
+                                delta, values_to_test[j])
+        for j in range(X.shape[1]))
+
+    return result
 
 
 def t_ij(i, j, n):
@@ -174,17 +183,54 @@ def p_value_cut(p_values, values_to_test, feature, epsilon=10):
     values_to_test_sorted = np.sort(values_to_test)
 
     epsilon /= 100
-    p_corrected_1 = norm.pdf(1 - p_value_min / 2) * (z - 1 / z) * np.log(
+    p_corr_1 = norm.pdf(1 - p_value_min / 2) * (z - 1 / z) * np.log(
         (1 - epsilon) ** 2 / epsilon ** 2) + 4 * norm.pdf(z) / z
 
     for i in np.arange(n_tested - 1):
         l[i] = np.count_nonzero(feature <= values_to_test_sorted[i])
         if i >= 1:
             D[i - 1] = d_ij(l[i - 1], l[i], z, feature.shape[0])
-    p_corrected_2 = p_value_min + np.sum(D)
+    p_corr_2 = p_value_min + np.sum(D)
 
-    p_corrected = np.min((p_corrected_1, p_corrected_2, 1))
-    if np.isnan(p_corrected) or np.isinf(p_corrected):
-        p_corrected = p_value_min
+    p_value_min_corrected = np.min((p_corr_1, p_corr_2, 1))
+    if np.isnan(p_value_min_corrected) or np.isinf(p_value_min_corrected):
+        p_value_min_corrected = p_value_min
 
-    return p_corrected
+    return p_value_min_corrected
+
+
+def bootstrap_cut_max_t(X, boundaries, Y, delta, auto_cutoff_rslt, B=10,
+                        features_names=None, verbose=False):
+    if features_names is None:
+        features_names = [str(j) for j in range(X.shape[1])]
+    n_samples, n_features = X.shape
+    t_values_init, values_to_test_init, t_values_B = [], [], []
+    for j in range(n_features):
+        t_values_init.append(auto_cutoff_rslt[j].t_values)
+        values_to_test_j = auto_cutoff_rslt[j].values_to_test
+        values_to_test_init.append(values_to_test_j)
+        n_tested = values_to_test_j.size
+        t_values_B.append(pd.DataFrame(np.zeros((B, n_tested))))
+
+    for b in np.arange(B):
+        if verbose:
+            stdout.write("\rBootstrap: %d%%" % ((b + 1) * 100 / B))
+            stdout.flush()
+        perm = np.random.choice(n_samples, size=n_samples, replace=True)
+        auto_cutoff_rslt_b = auto_cutoff(X[perm], boundaries, Y[perm],
+                                         delta[perm], values_to_test_init,
+                                         features_names=features_names)
+        for j in range(n_features):
+            t_values_B[j].ix[b, :] = auto_cutoff_rslt_b[j].t_values.abs()
+
+    adjusted_p_values = []
+    for j in range(n_features):
+        sd = t_values_B[j].std(0)
+        sd[sd < 1] = 1
+        mean = t_values_B[j].mean(0)
+        t_val_B_H0_j = (t_values_B[j] - mean) / sd
+        maxT = t_val_B_H0_j.abs().max(0)
+        adjusted_p_values.append(
+            [(maxT > np.abs(t_k)).mean() for t_k in t_values_init[j]])
+
+    return adjusted_p_values
