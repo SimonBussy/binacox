@@ -199,6 +199,44 @@ def p_value_cut(p_values, values_to_test, feature, epsilon=10):
     return p_value_min_corrected
 
 
+# def bootstrap_cut_max_t(X, boundaries, Y, delta, auto_cutoff_rslt, B=10,
+#                         features_names=None, verbose=False):
+#     if features_names is None:
+#         features_names = [str(j) for j in range(X.shape[1])]
+#     n_samples, n_features = X.shape
+#     t_values_init, values_to_test_init = [], []
+#     for j in range(n_features):
+#         t_values_init.append(auto_cutoff_rslt[j].t_values)
+#         values_to_test_init.append(auto_cutoff_rslt[j].values_to_test)
+#
+#     n_tested = t_values_init[0].size
+#     t_values_B = n_features * [np.zeros((B, n_tested))]
+#
+#     for b in np.arange(B):
+#         if verbose:
+#             stdout.write("\rBootstrap: %d%%" % ((b + 1) * 100 / B))
+#             stdout.flush()
+#         perm = np.random.choice(n_samples, size=n_samples, replace=True)
+#         auto_cutoff_rslt_b = auto_cutoff(X[perm], boundaries, Y[perm],
+#                                          delta[perm], values_to_test_init,
+#                                          features_names=features_names)
+#         for j in range(n_features):
+#             t_values_B[j][b, :] = np.abs(auto_cutoff_rslt_b[j].t_values)
+#
+#     adjusted_p_values = []
+#     for j in range(n_features):
+#         sd = np.std(t_values_B[j], 0)
+#         sd[sd < 1] = 1
+#         mean_ = np.repeat(np.mean(t_values_B[j], 0), B).reshape((B, n_tested))
+#         sd_ = np.repeat(1 / sd, B).reshape((B, n_tested))
+#         t_val_B_H0_j = (t_values_B[j] - mean_) * sd_
+#         maxT = np.max(np.abs(t_val_B_H0_j), 0)
+#         adjusted_p_values.append(
+#             [np.mean(maxT > np.abs(t_k)) for t_k in t_values_init[j]])
+#
+#     return adjusted_p_values
+
+
 def bootstrap_cut_max_t(X, boundaries, Y, delta, auto_cutoff_rslt, B=10,
                         features_names=None, verbose=False):
     if features_names is None:
