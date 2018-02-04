@@ -7,4 +7,5 @@ __pycache__
 
 # data folders
 simulations/results_data/
+simulations/results.zip
 tcga/data/
