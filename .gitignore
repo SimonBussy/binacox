@@ -4,3 +4,7 @@
 !.gitignore
 
 __pycache__
+
+# data folders
+simulations/results_data/
+tcga/data/
