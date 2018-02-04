@@ -8,4 +8,5 @@ __pycache__
 # data folders
 simulations/results_data/
 simulations/results.zip
+simulations/Job.log
 tcga/data/
