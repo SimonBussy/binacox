@@ -1,0 +1,23 @@
+#!/bin/bash
+##PBS -q big_para
+#PBS -q small_para
+#PBS -l select=1:ncpus=100:mem=10Gb
+#PBS -l walltime=72:00:00
+
+FILENAME="binacox"
+#PBS -N binacox
+#PBS -j oe -N out
+#PBS -m e -M simon.bussy@gmail.com
+
+. /usr/share/modules/init/sh
+source ~/.profile
+export OMP_NUM_THREADS=$NCPUS
+
+mkdir results_data
+cp $PBS_O_WORKDIR/run.py .
+cp $PBS_O_WORKDIR/../binacox.py .
+
+python run.py 3 1 auto_cutoff > Job.log 2>&1
+
+cp -r ./results_data $PBS_O_WORKDIR
+cp Job.log $PBS_O_WORKDIR

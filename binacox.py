@@ -166,8 +166,8 @@ def get_p_values_j(feature, mu_k, times, censoring, values_to_test, epsilon):
     p_values, t_values = [], []
     for val in values_to_test:
         feature_bin = feature <= val
-        mod = sm.PHReg(endog=times, status=censoring, exog=feature_bin,
-                       ties="efron")
+        mod = sm.PHReg(endog=times, status=censoring,
+                       exog=feature_bin.astype(int), ties="efron")
         fitted_model = mod.fit()
         p_values.append(fitted_model.pvalues[0])
         t_values.append(fitted_model.tvalues[0])
@@ -185,7 +185,7 @@ def auto_cutoff(X, boundaries, Y, delta, values_to_test=None,
     if features_names is None:
         features_names = [str(j) for j in range(X.shape[1])]
     X = np.array(X)
-    result = Parallel(n_jobs=10)(
+    result = Parallel(n_jobs=5)(
         delayed(get_p_values_j)(X[:, j],
                                 boundaries[features_names[j]].copy()[1:-1], Y,
                                 delta, values_to_test[j], epsilon=epsilon)
