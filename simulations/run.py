@@ -19,17 +19,17 @@ n_features = int(argv[1])
 n_cut_points = int(argv[2])
 model = argv[3]
 
-# N_simu = 100
-# N_samples = 20
-# n_samples_max = 4000
-# n_samples_grid = np.unique(np.geomspace(300, n_samples_max,
-#                                         N_samples).astype(int))
-
-N_simu = 5
-N_samples = 2
-n_samples_max = 400
+N_simu = 25
+N_samples = 20
+n_samples_max = 4000
 n_samples_grid = np.unique(np.geomspace(300, n_samples_max,
                                         N_samples).astype(int))
+
+# N_simu = 5
+# N_samples = 2
+# n_samples_max = 400
+# n_samples_grid = np.unique(np.geomspace(300, n_samples_max,
+#                                         N_samples).astype(int))
 
 if model == "binacox":
     result = pd.DataFrame(columns=["n_samples", "cut_points", "S",
