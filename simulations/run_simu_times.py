@@ -1,4 +1,4 @@
-import sys
+import sys, os, smtplib
 
 sys.path.append('../')
 import pandas as pd
@@ -9,6 +9,10 @@ from tick.simulation import SimuCoxRegWithCutPoints
 from tick.preprocessing.features_binarizer import FeaturesBinarizer
 from tick.inference import CoxRegression
 from binacox import get_p_values_j
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import COMMASPACE
 
 
 def get_times1(n_simu, n_samples, n_features, n_cut_points):
@@ -102,8 +106,8 @@ n_features = 1
 n_cut_points = 2
 cov_corr = .5
 sparsity = .2
-N_simu = 50
-n_samples_grid = [200, 300, 500, 1000, 2000]
+N_simu = 25
+n_samples_grid = [300, 500, 1000, 2000, 4000]
 
 result_ = pd.DataFrame(columns=["n_samples", "time_bina", "time_ac_all",
                                 "time_ac_grid"])
@@ -155,3 +159,38 @@ for i, n_features in enumerate(n_features_grid):
     result[n_features] = result_n
 
 result.to_json("./results_data/time2")
+
+# compress results and send it by email
+os.system('say "computation finished"')
+os.system('zip -r results.zip results_data')
+
+send_from = 'simon.bussy@upmc.fr'
+send_to = ['simon.bussy@gmail.com']
+
+subject = "computation finished for computing times"
+text = "results available \n"
+files = "./results.zip"
+
+msg = MIMEMultipart()
+msg['From'] = send_from
+msg['To'] = COMMASPACE.join(send_to)
+msg['Subject'] = subject
+
+msg.attach(MIMEText(text))
+
+with open(files, "rb") as fil:
+    part = MIMEApplication(
+        fil.read(),
+        Name="results.zip"
+    )
+    part[
+        'Content-Disposition'] = 'attachment; filename="results.zip"'
+    msg.attach(part)
+
+try:
+    smtp = smtplib.SMTP('smtp.upmc.fr')
+    smtp.sendmail(send_from, send_to, msg.as_string())
+    smtp.close()
+    print("Successfully sent email")
+except smtplib.SMTPException:
+    print("Error: unable to send email")

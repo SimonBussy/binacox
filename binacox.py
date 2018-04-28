@@ -6,6 +6,7 @@ from sklearn.externals.joblib import Parallel, delayed
 from tick.preprocessing.features_binarizer import FeaturesBinarizer
 from tick.inference import CoxRegression
 import warnings
+
 warnings.filterwarnings('ignore')
 import statsmodels.api as sm
 
@@ -72,22 +73,30 @@ def fit_and_score(learner, features, features_bin, times, censoring,
                 if jump_j.size == 0:
                     cut_points_estimate_j = np.array([-np.inf, np.inf])
                 else:
-                    cut_points_estimate_j = boundaries[features_names[j]][jump_j]
+                    cut_points_estimate_j = boundaries[features_names[j]][
+                        jump_j]
                     if cut_points_estimate_j[0] != -np.inf:
                         cut_points_estimate_j = np.insert(cut_points_estimate_j,
                                                           0, -np.inf)
                     if cut_points_estimate_j[-1] != np.inf:
                         cut_points_estimate_j = np.append(cut_points_estimate_j,
-                                                        np.inf)
+                                                          np.inf)
             cut_points_estimates[features_names[j]] = cut_points_estimate_j
         binarizer = FeaturesBinarizer(method='given',
                                       bins_boundaries=cut_points_estimates)
         binarized_features = binarizer.fit_transform(features)
+        blocks_start = binarizer.blocks_start
+        blocks_length = binarizer.blocks_length
         X_bin_train = binarized_features[idx_train]
         X_bin_test = binarized_features[idx_test]
         solver = 'agd'
-        learner_final = CoxRegression(tol=1e-5, solver=solver, verbose=False,
-                                      penalty='none')
+        learner_final = CoxRegression(penalty='binarsity', tol=1e-5,
+                                      solver=solver, verbose=False,
+                                      max_iter=100, step=0.3,
+                                      blocks_start=blocks_start,
+                                      blocks_length=blocks_length,
+                                      warm_start=True, C=1e10)
+        learner_final._solver_obj.linesearch = False
         learner_final.fit(X_bin_train, Y_train, delta_train)
         score = learner_final.score(X_bin_test, Y_test, delta_test)
     else:
@@ -95,6 +104,7 @@ def fit_and_score(learner, features, features_bin, times, censoring,
                          "try using 'log_lik' instead" % scoring)
     return score
 
+from sklearn.datasets.samples_generator import make_blobs
 
 def get_groups(coeffs):
     n_coeffs = len(coeffs)
@@ -131,7 +141,8 @@ def get_groups(coeffs):
 
 
 def get_m_1(hat_K_star, K_star, n_features):
-    return (1 / n_features) * np.linalg.norm(hat_K_star - K_star, ord=1)
+    # return (1 / n_features) * np.linalg.norm(hat_K_star - K_star, ord=1)
+    return (1 / n_features) * (hat_K_star - K_star).sum()
 
 
 def get_m_2(cut_points_estimates, cut_points, S):
