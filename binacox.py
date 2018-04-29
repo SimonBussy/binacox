@@ -13,24 +13,33 @@ import statsmodels.api as sm
 
 def compute_score(learner, features, features_binarized, times, censoring,
                   blocks_start, blocks_length, boundaries, C=10, n_folds=10,
-                  features_names=None, shuffle=True, scoring="log_lik",
-                  n_jobs=1, verbose=False):
+                  features_names=None, shuffle=True, n_jobs=1, verbose=False,
+                  validation_data=None):
     scores = cross_val_score(learner, features, features_binarized, times,
                              censoring, blocks_start, blocks_length, boundaries,
                              n_folds=n_folds, shuffle=shuffle, C=C,
-                             features_names=features_names, scoring=scoring,
-                             n_jobs=n_jobs, verbose=verbose)
-    scores_mean = scores.mean()
-    scores_std = scores.std()
+                             features_names=features_names, n_jobs=n_jobs,
+                             verbose=verbose, validation_data=validation_data)
+    scores_test = scores[:, 0]
+    scores_validation = scores[:, 1]
+    if validation_data is not None:
+        scores_validation_mean = scores_validation.mean()
+        scores_validation_std = scores_validation.std()
+    else:
+        scores_validation_mean, scores_validation_std = None, None
+
+    scores_mean = scores_test.mean()
+    scores_std = scores_test.std()
     if verbose:
-        print("\n%s: score %0.3f (+/- %0.3f)" % (
-            scoring, scores_mean, scores_std))
-    return scores_mean, scores_std
+        print("\nscore %0.3f (+/- %0.3f)" % (scores_mean, scores_std))
+    scores = [scores_mean, scores_std, scores_validation_mean,
+              scores_validation_std]
+    return scores
 
 
 def cross_val_score(learner, features, features_binarized, times, censoring,
                     blocks_start, blocks_length, boundaries, n_folds, shuffle,
-                    C, features_names, scoring, n_jobs, verbose):
+                    C, features_names, n_jobs, verbose, validation_data):
     cv = KFold(n_splits=n_folds, shuffle=shuffle)
     cv_iter = list(cv.split(features))
 
@@ -40,14 +49,14 @@ def cross_val_score(learner, features, features_binarized, times, censoring,
         delayed(fit_and_score)(learner, features, features_binarized, times,
                                censoring, blocks_start, blocks_length,
                                boundaries, features_names, idx_train, idx_test,
-                               scoring)
+                               validation_data)
         for (idx_train, idx_test) in cv_iter)
     return np.array(scores)
 
 
 def fit_and_score(learner, features, features_bin, times, censoring,
                   blocks_start, blocks_length, boundaries, features_names,
-                  idx_train, idx_test, scoring):
+                  idx_train, idx_test, validation_data):
     if features_names is None:
         features_names = [str(j) for j in range(features.shape[1])]
     X_train, X_test = features_bin[idx_train], features_bin[idx_test]
@@ -57,54 +66,58 @@ def fit_and_score(learner, features, features_bin, times, censoring,
     learner._solver_obj.linesearch = False
     learner.fit(X_train, Y_train, delta_train)
 
-    if scoring == 'log_lik':
-        score = learner.score(X_test, Y_test, delta_test)
-    elif scoring == 'log_lik_refit':
-        coeffs = learner.coeffs
-        cut_points_estimates = {}
-        for j, start in enumerate(blocks_start):
-            coeffs_j = coeffs[start:start + blocks_length[j]]
-            all_zeros = not np.any(coeffs_j)
-            if all_zeros:
+    coeffs = learner.coeffs
+    cut_points_estimates = {}
+    for j, start in enumerate(blocks_start):
+        coeffs_j = coeffs[start:start + blocks_length[j]]
+        all_zeros = not np.any(coeffs_j)
+        if all_zeros:
+            cut_points_estimate_j = np.array([-np.inf, np.inf])
+        else:
+            groups_j = get_groups(coeffs_j)
+            jump_j = np.where(groups_j[1:] - groups_j[:-1] != 0)[0] + 1
+            if jump_j.size == 0:
                 cut_points_estimate_j = np.array([-np.inf, np.inf])
             else:
-                groups_j = get_groups(coeffs_j)
-                jump_j = np.where(groups_j[1:] - groups_j[:-1] != 0)[0] + 1
-                if jump_j.size == 0:
-                    cut_points_estimate_j = np.array([-np.inf, np.inf])
-                else:
-                    cut_points_estimate_j = boundaries[features_names[j]][
-                        jump_j]
-                    if cut_points_estimate_j[0] != -np.inf:
-                        cut_points_estimate_j = np.insert(cut_points_estimate_j,
-                                                          0, -np.inf)
-                    if cut_points_estimate_j[-1] != np.inf:
-                        cut_points_estimate_j = np.append(cut_points_estimate_j,
-                                                          np.inf)
-            cut_points_estimates[features_names[j]] = cut_points_estimate_j
-        binarizer = FeaturesBinarizer(method='given',
-                                      bins_boundaries=cut_points_estimates)
-        binarized_features = binarizer.fit_transform(features)
-        blocks_start = binarizer.blocks_start
-        blocks_length = binarizer.blocks_length
-        X_bin_train = binarized_features[idx_train]
-        X_bin_test = binarized_features[idx_test]
-        solver = 'agd'
-        learner_final = CoxRegression(penalty='binarsity', tol=1e-5,
-                                      solver=solver, verbose=False,
-                                      max_iter=100, step=0.3,
-                                      blocks_start=blocks_start,
-                                      blocks_length=blocks_length,
-                                      warm_start=True, C=1e10)
-        learner_final._solver_obj.linesearch = False
-        learner_final.fit(X_bin_train, Y_train, delta_train)
-        score = learner_final.score(X_bin_test, Y_test, delta_test)
-    else:
-        raise ValueError("scoring ``%s`` not implemented, "
-                         "try using 'log_lik' instead" % scoring)
-    return score
+                cut_points_estimate_j = boundaries[features_names[j]][
+                    jump_j]
+                if cut_points_estimate_j[0] != -np.inf:
+                    cut_points_estimate_j = np.insert(cut_points_estimate_j,
+                                                      0, -np.inf)
+                if cut_points_estimate_j[-1] != np.inf:
+                    cut_points_estimate_j = np.append(cut_points_estimate_j,
+                                                      np.inf)
+        cut_points_estimates[features_names[j]] = cut_points_estimate_j
+    binarizer = FeaturesBinarizer(method='given',
+                                  bins_boundaries=cut_points_estimates)
+    binarized_features = binarizer.fit_transform(features)
+    blocks_start = binarizer.blocks_start
+    blocks_length = binarizer.blocks_length
+    X_bin_train = binarized_features[idx_train]
+    X_bin_test = binarized_features[idx_test]
+    solver = 'agd'
+    learner = CoxRegression(penalty='binarsity', tol=1e-5,
+                            solver=solver, verbose=False,
+                            max_iter=100, step=0.3,
+                            blocks_start=blocks_start,
+                            blocks_length=blocks_length,
+                            warm_start=True, C=1e10)
+    learner._solver_obj.linesearch = False
+    learner.fit(X_bin_train, Y_train, delta_train)
+    score = learner.score(X_bin_test, Y_test, delta_test)
 
-from sklearn.datasets.samples_generator import make_blobs
+    if validation_data is not None:
+        X_validation = validation_data[0]
+        X_bin_validation = binarizer.fit_transform(X_validation)
+        Y_validation = validation_data[1]
+        delta_validation = validation_data[2]
+        score_validation = learner.score(X_bin_validation, Y_validation,
+                                         delta_validation)
+    else:
+        score_validation = None
+
+    return score, score_validation
+
 
 def get_groups(coeffs):
     n_coeffs = len(coeffs)
