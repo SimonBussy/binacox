@@ -25,7 +25,7 @@ def get_times1(n_simu, n_samples, n_features, n_cut_points):
                                    sparsity=sparsity)
     X, Y, delta, cut_points, beta_star, S = simu.simulate()
 
-    # BinaCox method
+    # Binacox method
     tic = time()
     n_cuts = 50
     binarizer = FeaturesBinarizer(n_cuts=n_cuts)
@@ -79,7 +79,7 @@ def get_times2(n_simu, n_samples, n_features, n_cut_points):
                                    sparsity=sparsity)
     X, Y, delta, cut_points, beta_star, S = simu.simulate()
 
-    # BinaCox method
+    # Binacox method
     tic = time()
     n_cuts = 50
     binarizer = FeaturesBinarizer(n_cuts=n_cuts)
@@ -101,12 +101,12 @@ def get_times2(n_simu, n_samples, n_features, n_cut_points):
 
 
 # first setting
-print("\nBinaCox vs. Auto Cutoff computing times")
+print("\nBinacox vs. Auto Cutoff computing times")
 n_features = 1
 n_cut_points = 2
 cov_corr = .5
 sparsity = .2
-N_simu = 25
+N_simu = 100
 n_samples_grid = [300, 500, 1000, 2000, 4000]
 
 result_ = pd.DataFrame(columns=["n_samples", "time_bina", "time_ac_all",
@@ -125,7 +125,7 @@ for i, n_samples in enumerate(n_samples_grid):
 result = pd.DataFrame(columns=["n", "method", "time"])
 tmp = pd.DataFrame(columns=["n", "method", "time"])
 tmp.n = result_.n_samples
-tmp.method = "BinaCox"
+tmp.method = "Binacox"
 tmp.time = result_.time_bina
 result = result.append(tmp, ignore_index=True)
 
@@ -142,11 +142,12 @@ result = result.append(tmp, ignore_index=True)
 result.to_json("./results_data/time1")
 
 # second setting
-print("\nBinaCox computing times = f(p)")
+print("\nBinacox computing times = f(p)")
 n_samples = 2000
-N_features = 20
+N_features = 25
+n_features_min = 2
 n_features_max = 100
-n_features_grid = np.unique(np.geomspace(2, n_features_max,
+n_features_grid = np.unique(np.geomspace(n_features_min, n_features_max,
                                          N_features).astype(int))
 result = pd.DataFrame()
 for i, n_features in enumerate(n_features_grid):

@@ -154,8 +154,8 @@ def get_groups(coeffs):
 
 
 def get_m_1(hat_K_star, K_star, n_features):
-    # return (1 / n_features) * np.linalg.norm(hat_K_star - K_star, ord=1)
-    return (1 / n_features) * (hat_K_star - K_star).sum()
+    return (1 / n_features) * np.linalg.norm(hat_K_star - K_star, ord=1)
+    # return (1 / n_features) * (hat_K_star - K_star).sum()
 
 
 def get_m_2(cut_points_estimates, cut_points, S):
