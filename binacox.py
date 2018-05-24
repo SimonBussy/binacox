@@ -5,9 +5,6 @@ from sklearn.model_selection import KFold
 from sklearn.externals.joblib import Parallel, delayed
 from tick.preprocessing.features_binarizer import FeaturesBinarizer
 from tick.inference import CoxRegression
-import warnings
-
-warnings.filterwarnings('ignore')
 import statsmodels.api as sm
 
 
@@ -153,25 +150,20 @@ def get_groups(coeffs):
     return groups.astype(int)
 
 
-def get_m_1(hat_K_star, K_star, n_features):
-    return (1 / n_features) * np.linalg.norm(hat_K_star - K_star, ord=1)
-    # return (1 / n_features) * (hat_K_star - K_star).sum()
-
-
-def get_m_2(cut_points_estimates, cut_points, S):
-    m_2, d = 0, 0
+def get_m_1(cut_points_estimates, cut_points, S):
+    m_1, d = 0, 0
     n_features = len(cut_points)
     for j in set(range(n_features)) - set(S):
         mu_star_j = cut_points[str(j)][1:-1]
         hat_mu_star_j = cut_points_estimates[str(j)][1:-1]
         if len(hat_mu_star_j) > 0:
             d += 1
-            m_2 += get_H(mu_star_j, hat_mu_star_j)
+            m_1 += get_H(mu_star_j, hat_mu_star_j)
     if d == 0:
-        m_2 = np.nan
+        m_1 = np.nan
     else:
-        m_2 *= (1 / d)
-    return m_2
+        m_1 *= (1 / d)
+    return m_1
 
 
 def get_H(A, B):
@@ -180,6 +172,10 @@ def get_H(A, B):
 
 def get_E(A, B):
     return max([min([abs(a - b) for a in A]) for b in B])
+
+
+def get_m_2(hat_K_star, S):
+    return (1 / len(S)) * hat_K_star[S].sum()
 
 
 def get_p_values_j(feature, mu_k, times, censoring, values_to_test, epsilon):

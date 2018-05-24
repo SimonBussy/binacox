@@ -26,7 +26,7 @@ def get_times1(n_simu, n_samples, n_features, n_cut_points):
     X, Y, delta, cut_points, beta_star, S = simu.simulate()
 
     # Binacox method
-    tic = time()
+
     n_cuts = 50
     binarizer = FeaturesBinarizer(n_cuts=n_cuts)
     X_bin = binarizer.fit_transform(X)
