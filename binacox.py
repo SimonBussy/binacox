@@ -198,7 +198,7 @@ def get_p_values_j(feature, mu_k, times, censoring, values_to_test, epsilon):
     return p_values
 
 
-def auto_cutoff(X, boundaries, Y, delta, values_to_test=None,
+def multiple_testing(X, boundaries, Y, delta, values_to_test=None,
                 features_names=None, epsilon=5):
     if values_to_test is None:
         values_to_test = X.shape[1] * [None]
@@ -247,32 +247,32 @@ def p_value_cut(p_values, values_to_test, feature, epsilon=5):
     return p_value_min_corrected
 
 
-def auto_cutoff_perm(n_samples, X, boundaries, Y, delta, values_to_test_init,
+def multiple_testing_perm(n_samples, X, boundaries, Y, delta, values_to_test_init,
                      features_names, epsilon):
     np.random.seed()
     perm = np.random.choice(n_samples, size=n_samples, replace=True)
-    auto_cutoff_rslt = auto_cutoff(X[perm], boundaries, Y[perm],
+    multiple_testing_rslt = multiple_testing(X[perm], boundaries, Y[perm],
                                    delta[perm], values_to_test_init,
                                    features_names=features_names,
                                    epsilon=epsilon)
-    return auto_cutoff_rslt
+    return multiple_testing_rslt
 
 
-def bootstrap_cut_max_t(X, boundaries, Y, delta, auto_cutoff_rslt, B=10,
+def bootstrap_cut_max_t(X, boundaries, Y, delta, multiple_testing_rslt, B=10,
                         features_names=None, epsilon=5):
     if features_names is None:
         features_names = [str(j) for j in range(X.shape[1])]
     n_samples, n_features = X.shape
     t_values_init, values_to_test_init, t_values_B = [], [], []
     for j in range(n_features):
-        t_values_init.append(auto_cutoff_rslt[j].t_values)
-        values_to_test_j = auto_cutoff_rslt[j].values_to_test
+        t_values_init.append(multiple_testing_rslt[j].t_values)
+        values_to_test_j = multiple_testing_rslt[j].values_to_test
         values_to_test_init.append(values_to_test_j)
         n_tested_j = values_to_test_j.size
         t_values_B.append(pd.DataFrame(np.zeros((B, n_tested_j))))
 
     result = Parallel(n_jobs=10)(
-        delayed(auto_cutoff_perm)(n_samples, X, boundaries, Y, delta,
+        delayed(multiple_testing_perm)(n_samples, X, boundaries, Y, delta,
                                   values_to_test_init, features_names, epsilon)
         for _ in np.arange(B))
 
