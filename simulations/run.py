@@ -5,10 +5,9 @@ import pandas as pd
 import numpy as np
 from sys import stdout, argv
 from time import time
-from tick.simulation import SimuCoxRegWithCutPoints
 from tick.preprocessing.features_binarizer import FeaturesBinarizer
-from tick.inference import CoxRegression
-from binacox import compute_score, auto_cutoff, get_groups, p_value_cut
+from tick.survival import CoxRegression, SimuCoxRegWithCutPoints
+from binacox import compute_score, multiple_testing, get_groups, p_value_cut
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -53,12 +52,12 @@ def simu_autocutoff(n_simu, n_samples, n_features, n_cut_points):
     epsilon = 10
 
     tic = time()
-    auto_cutoff_rslt = auto_cutoff(X, boundaries, Y, delta, epsilon=epsilon)
+    multiple_testing_rslt = multiple_testing(X, boundaries, Y, delta, epsilon=epsilon)
     # Lausen & Schumacher correction
     p_values_corr, p_values_min, cut_points_estimates = [], [], []
     n_tested = []
     for j in range(n_features):
-        p_values_j = auto_cutoff_rslt[j]
+        p_values_j = multiple_testing_rslt[j]
         n_tested.append(p_values_j.values_to_test.shape[0])
         p_values_min.append(p_values_j.p_values.min())
         p_values_corr.append(
@@ -177,7 +176,7 @@ for n_samples_idx, n_samples in enumerate(n_samples_grid):
             result.loc[n_result] = [n_samples, cut_points, S,
                                     cut_points_estimates, C_chosen, tac - tic]
 
-    if model == "auto_cutoff":
+    if model == "multiple_testing":
         stdout.write("\rn_samples: %s/%s" % (n_samples_idx + 1,
                                              len(n_samples_grid)))
         stdout.flush()

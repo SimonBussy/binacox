@@ -5,9 +5,8 @@ import pandas as pd
 import numpy as np
 from time import time
 from sklearn.externals.joblib import Parallel, delayed
-from tick.simulation import SimuCoxRegWithCutPoints
 from tick.preprocessing.features_binarizer import FeaturesBinarizer
-from tick.inference import CoxRegression
+from tick.survival import CoxRegression, SimuCoxRegWithCutPoints
 from binacox import get_p_values_j
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -26,7 +25,6 @@ def get_times1(n_simu, n_samples, n_features, n_cut_points):
     X, Y, delta, cut_points, beta_star, S = simu.simulate()
 
     # Binacox method
-
     n_cuts = 50
     binarizer = FeaturesBinarizer(n_cuts=n_cuts)
     X_bin = binarizer.fit_transform(X)

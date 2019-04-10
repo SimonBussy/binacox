@@ -4,15 +4,15 @@ from scipy.stats import norm
 from sklearn.model_selection import KFold
 from sklearn.externals.joblib import Parallel, delayed
 from tick.preprocessing.features_binarizer import FeaturesBinarizer
-from tick.inference import CoxRegression
+from tick.survival import CoxRegression
 import statsmodels.api as sm
 
 
-def compute_score(learner, features, features_binarized, times, censoring,
+def compute_score(features, features_binarized, times, censoring,
                   blocks_start, blocks_length, boundaries, C=10, n_folds=10,
                   features_names=None, shuffle=True, n_jobs=1, verbose=False,
                   validation_data=None):
-    scores = cross_val_score(learner, features, features_binarized, times,
+    scores = cross_val_score(features, features_binarized, times,
                              censoring, blocks_start, blocks_length, boundaries,
                              n_folds=n_folds, shuffle=shuffle, C=C,
                              features_names=features_names, n_jobs=n_jobs,
@@ -34,36 +34,41 @@ def compute_score(learner, features, features_binarized, times, censoring,
     return scores
 
 
-def cross_val_score(learner, features, features_binarized, times, censoring,
+def cross_val_score(features, features_binarized, times, censoring,
                     blocks_start, blocks_length, boundaries, n_folds, shuffle,
                     C, features_names, n_jobs, verbose, validation_data):
     cv = KFold(n_splits=n_folds, shuffle=shuffle)
     cv_iter = list(cv.split(features))
 
     parallel = Parallel(n_jobs=n_jobs, verbose=verbose)
-    learner.C = C
     scores = parallel(
-        delayed(fit_and_score)(learner, features, features_binarized, times,
+        delayed(fit_and_score)(features, features_binarized, times,
                                censoring, blocks_start, blocks_length,
                                boundaries, features_names, idx_train, idx_test,
-                               validation_data)
+                               validation_data, C)
         for (idx_train, idx_test) in cv_iter)
     return np.array(scores)
 
 
-def fit_and_score(learner, features, features_bin, times, censoring,
+def fit_and_score(features, features_bin, times, censoring,
                   blocks_start, blocks_length, boundaries, features_names,
-                  idx_train, idx_test, validation_data):
+                  idx_train, idx_test, validation_data, C):
     if features_names is None:
         features_names = [str(j) for j in range(features.shape[1])]
     X_train, X_test = features_bin[idx_train], features_bin[idx_test]
     Y_train, Y_test = times[idx_train], times[idx_test]
     delta_train, delta_test = censoring[idx_train], censoring[idx_test]
 
+    learner = CoxRegression(penalty='binarsity', tol=1e-5,
+                            verbose=False, max_iter=100, step=0.3,
+                            blocks_start=blocks_start,
+                            blocks_length=blocks_length,
+                            warm_start=True)
     learner._solver_obj.linesearch = False
+    learner.C = C
     learner.fit(X_train, Y_train, delta_train)
-
     coeffs = learner.coeffs
+
     cut_points_estimates = {}
     for j, start in enumerate(blocks_start):
         coeffs_j = coeffs[start:start + blocks_length[j]]
@@ -92,24 +97,22 @@ def fit_and_score(learner, features, features_bin, times, censoring,
     blocks_length = binarizer.blocks_length
     X_bin_train = binarized_features[idx_train]
     X_bin_test = binarized_features[idx_test]
-    solver = 'agd'
-    learner = CoxRegression(penalty='binarsity', tol=1e-5,
-                            solver=solver, verbose=False,
-                            max_iter=100, step=0.3,
-                            blocks_start=blocks_start,
-                            blocks_length=blocks_length,
-                            warm_start=True, C=1e10)
-    learner._solver_obj.linesearch = False
-    learner.fit(X_bin_train, Y_train, delta_train)
-    score = learner.score(X_bin_test, Y_test, delta_test)
+    learner_ = CoxRegression(penalty='binarsity', tol=1e-5,
+                             verbose=False, max_iter=100, step=0.3,
+                             blocks_start=blocks_start,
+                             blocks_length=blocks_length,
+                             warm_start=True, C=1e10)
+    learner_._solver_obj.linesearch = False
+    learner_.fit(X_bin_train, Y_train, delta_train)
+    score = learner_.score(X_bin_test, Y_test, delta_test)
 
     if validation_data is not None:
         X_validation = validation_data[0]
         X_bin_validation = binarizer.fit_transform(X_validation)
         Y_validation = validation_data[1]
         delta_validation = validation_data[2]
-        score_validation = learner.score(X_bin_validation, Y_validation,
-                                         delta_validation)
+        score_validation = learner_.score(X_bin_validation, Y_validation,
+                                          delta_validation)
     else:
         score_validation = None
 
