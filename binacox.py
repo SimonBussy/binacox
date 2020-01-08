@@ -1,11 +1,16 @@
 import numpy as np
 import pandas as pd
+import scipy
 from scipy.stats import norm
 from sklearn.model_selection import KFold
 from sklearn.externals.joblib import Parallel, delayed
 from tick.preprocessing.features_binarizer import FeaturesBinarizer
 from tick.survival import CoxRegression
+from lifelines.utils import concordance_index
 import statsmodels.api as sm
+import pylab as pl
+import warnings
+warnings.filterwarnings('ignore')
 
 
 def compute_score(features, features_binarized, times, censoring,
@@ -181,6 +186,29 @@ def get_m_2(hat_K_star, S):
     return (1 / len(S)) * hat_K_star[S].sum()
 
 
+def plot_screening(screening_strategy, screening_marker, cancer, P):
+    fig = pl.figure()
+    ax = fig.add_subplot(111)
+    alpha = .8
+    lw = 2
+    label = 'Selected'
+    n_features = len(screening_marker)
+    ax.plot(range(P), screening_marker[:P], 'r',
+            lw=lw, alpha=alpha, label=label)
+    label = 'Rejected'
+    ax.plot(range(P, n_features), screening_marker[P:],
+            'b', lw=lw, alpha=alpha, label=label)
+    pl.legend(fontsize=18)
+    pl.xlabel(r'$j$', fontsize=25)
+    pl.tick_params(axis='x', which='both', top='off')
+    pl.xticks(fontsize=18)
+    pl.yticks(fontsize=18)
+    pl.title("%s screening on %s" % (screening_strategy, cancer),
+             fontsize=20)
+    pl.tight_layout()
+    pl.show()
+
+
 def get_p_values_j(feature, mu_k, times, censoring, values_to_test, epsilon):
     if values_to_test is None:
         p1 = np.percentile(feature, epsilon)
@@ -202,7 +230,7 @@ def get_p_values_j(feature, mu_k, times, censoring, values_to_test, epsilon):
 
 
 def multiple_testing(X, boundaries, Y, delta, values_to_test=None,
-                features_names=None, epsilon=5):
+                     features_names=None, epsilon=5):
     if values_to_test is None:
         values_to_test = X.shape[1] * [None]
     if features_names is None:
@@ -293,3 +321,27 @@ def bootstrap_cut_max_t(X, boundaries, Y, delta, multiple_testing_rslt, B=10,
         adjusted_p_values.append(
             [(maxT_j > np.abs(t_k)).mean() for t_k in t_values_init[j]])
     return adjusted_p_values
+
+
+def refit_and_predict(cut_points_estimates, X_train, X_test, Y_train,
+                      delta_train, Y_test, delta_test):
+
+    binarizer = FeaturesBinarizer(method='given',
+                                  bins_boundaries=cut_points_estimates,
+                                  remove_first=True)
+    binarizer.fit(pd.concat([X_train, X_test]))
+    X_bin_train = binarizer.transform(X_train)
+    X_bin_test = binarizer.transform(X_test)
+
+    learner = CoxRegression(penalty='none', tol=1e-5,
+                            solver='agd', verbose=False,
+                            max_iter=100, step=0.3,
+                            warm_start=True)
+    learner._solver_obj.linesearch = False
+    learner.fit(X_bin_train, Y_train, delta_train)
+    coeffs = learner.coeffs
+    marker = X_bin_test.dot(coeffs)
+    c_index = concordance_index(Y_test, marker, delta_test)
+    c_index = max(c_index, 1 - c_index)
+
+    return c_index
