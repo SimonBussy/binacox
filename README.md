@@ -7,7 +7,7 @@ method to help evaluate how many cut-points points are optimal for a given featu
 in a survival analysis setting. Moreover, most existing methods are univariate, hence
 not well suited for high-dimensional frameworks. 
 
-We introduces a prognostic method called Binacox to deal with the problem of detecting multiple cut-points per
+We introduce a prognostic method called Binacox to deal with the problem of detecting multiple cut-points per
 features in a multivariate setting where a large number of continuous features are
 available. It is based on the Cox model and combines one-hot encodings with the
 binarsity penalty. This penalty uses total-variation regularization together with an
