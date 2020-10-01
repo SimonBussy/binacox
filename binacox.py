@@ -3,7 +3,7 @@ import pandas as pd
 import scipy
 from scipy.stats import norm
 from sklearn.model_selection import KFold
-from sklearn.externals.joblib import Parallel, delayed
+from joblib import Parallel, delayed
 from tick.preprocessing.features_binarizer import FeaturesBinarizer
 from tick.survival import CoxRegression
 from lifelines.utils import concordance_index

@@ -1,5 +1,7 @@
-# Binacox: automatic cut-points detection in high-dimensional Cox model, with applications to genetic data
+# Binacox
+_binacox_ is a high-dimensional survival model that automatically detects multiple cut-points
 
+## Quick description
 Determining significant prognostic biomarkers is of increasing importance in many
 areas of medicine. In order to translate a continuous biomarker into a clinical decision,
 it is often necessary to determine cut-points. There is so far no standard
@@ -15,3 +17,36 @@ extra linear constraint to avoid collinearity between the one-hot encodings and 
 feature selection. 
 
 See preprint [here](http://simonbussy.fr/papers/binacox.pdf).
+
+## Installation
+Clone the repository, then inside the folder, use a `virtualenv` to install the requirements
+```shell script
+git clone git@github.com:Califrais/binacox.git
+cd binacox
+
+# If your default interpreter is Python3:
+virtualenv .env
+# If your default interpreter is Python2, you can explicitly target Python3 with:
+virtualenv -p python3 .env
+
+source .env/bin/activate
+```
+Then, to download all required modules and initialize the project run the following commands:
+```shell script
+pip install -r requirements.txt
+```
+
+To use the package outside the build directory, the build path should be added to the `PYTHONPATH` environment variable, as such (replace `$PWD` with the full path to the build directory if necessary):
+
+    export PYTHONPATH=$PYTHONPATH:$PWD
+
+For a permanent installation, this should be put in your shell setup script. To do so, you can run this from the _binacox_ directory:
+
+    echo 'export PYTHONPATH=$PYTHONPATH:'$PWD >> ~/.bashrc
+
+Replace `.bashrc` with the variant for your shell (e.g. `.tcshrc`, `.zshrc`, `.cshrc` etc.).
+
+## Other files
+
+The Jupyter notebook "tutorial" gives useful example of how to use the model based on simulated data.
+It will be very simple then to adapt it to your own data.
