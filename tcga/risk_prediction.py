@@ -1,5 +1,6 @@
 import os
 import sys
+
 sys.path.append('..')
 import pandas as pd
 import numpy as np
@@ -14,9 +15,10 @@ from tick.survival import CoxRegression
 from lifelines.utils import concordance_index
 import rpy2.robjects as ro
 from rpy2.robjects import pandas2ri
+from tcga.scoring import estim_proba, integrated_brier_score
 import warnings
-warnings.filterwarnings('ignore')
 
+warnings.filterwarnings('ignore')
 
 ##
 verbose = False
@@ -37,7 +39,7 @@ for cancer in cancers:
 
 ##
 test_size = .3  # 30% for testing
-B = 100  # number of runs
+B = 100  # number of runs  100
 P = 50  # top-P features
 C_chosen = {"GBM": 17, "KIRC": 5, "BRCA": 15.7}  # from external cross-val
 
@@ -46,7 +48,7 @@ ro.r('library(CoxBoost)')
 ro.r('library(randomForestSRC)')
 pandas2ri.activate()
 
-columns = ['Cancer', 'Model', 'C-index']
+columns = ['Cancer', 'Model', 'C-index', 'ibs']
 result = pd.DataFrame(columns=columns)
 for cancer in cancers:
     X = data[cancer]["X"]
@@ -103,9 +105,14 @@ for cancer in cancers:
                                 penalty='none', max_iter=100)
         learner.fit(X_train_, Y_train, delta_train)
         coeffs = learner.coeffs
-        marker = X_test_.dot(coeffs)
-        c_index = concordance_index(Y_test, marker, delta_test)
+        marker_cox = np.array(X_test_.dot(coeffs))
+        lp_train = np.array(X_train_.dot(coeffs))
+        c_index = concordance_index(Y_test, marker_cox, delta_test)
         c_index_continuous = max(c_index, 1 - c_index)
+
+        predictions = estim_proba(marker_cox, lp_train, Y_train, delta_train)
+        ibs_cox = integrated_brier_score(predictions['values'], predictions['times'],
+                               Y_test, delta_test, Y_train, delta_train)
 
         # Binacox
         print("Train Binacox screening_cox_topP...")
@@ -188,9 +195,14 @@ for cancer in cancers:
             all_groups += list(groups_j)
 
         # final binacox refit
-        c_index_bina = refit_and_predict(cut_points_estimates, X_train_,
+        c_index_bina, marker_bina, lp_train = refit_and_predict(cut_points_estimates, X_train_,
                                          X_test_, Y_train, delta_train, Y_test,
                                          delta_test)
+        predictions = estim_proba(marker_bina, lp_train, Y_train, delta_train)
+        ibs_bina = integrated_brier_score(predictions['values'],
+                                         predictions['times'],
+                                         Y_test, delta_test, Y_train,
+                                         delta_train)
 
         # Multiple testing method
         print("Train Multiple testing method...")
@@ -231,13 +243,26 @@ for cancer in cancers:
                 est_j.insert(1, cut_pts_j)
             cut_points_estimates_MT_LS[X_train_.columns[j]] = np.array(est_j)
 
-        c_index_MT_B = refit_and_predict(cut_points_estimates_MT_B, X_train_,
-                                         X_test_, Y_train, delta_train, Y_test,
-                                         delta_test)
+        c_index_MT_B, marker_MT_B, lp_train = refit_and_predict(cut_points_estimates_MT_B,
+                                                      X_train_,
+                                                      X_test_, Y_train,
+                                                      delta_train, Y_test,
+                                                      delta_test)
+        predictions = estim_proba(marker_MT_B, lp_train, Y_train, delta_train)
+        ibs_MT_B = integrated_brier_score(predictions['values'],
+                                          predictions['times'],
+                                          Y_test, delta_test, Y_train,
+                                          delta_train)
 
-        c_index_MT_LS = refit_and_predict(cut_points_estimates_MT_LS, X_train_,
-                                          X_test_, Y_train, delta_train, Y_test,
-                                          delta_test)
+        c_index_MT_LS, marker_MT_LS, lp_train = refit_and_predict(
+            cut_points_estimates_MT_LS, X_train_,
+            X_test_, Y_train, delta_train, Y_test,
+            delta_test)
+        predictions = estim_proba(marker_MT_LS, lp_train, Y_train, delta_train)
+        ibs_MT_LS = integrated_brier_score(predictions['values'],
+                                          predictions['times'],
+                                          Y_test, delta_test, Y_train,
+                                          delta_train)
 
         # Add CoxBoost and RSF
         print("Train CoxBoost...")
@@ -249,10 +274,19 @@ for cancer in cancers:
         ro.globalenv['delta_test'] = delta_test
         ro.r('cbfit <- CoxBoost(Y, delta, as.matrix(X), stepno=300, '
              'penalty=100)')
-        marker = ro.r('marker_coxBoost <- predict(cbfit, X_test, '
-                      'Y_test, delta_test, type="lp")')
-        c_index_coxBoost = concordance_index(Y_test, marker, delta_test)
+        lp_train = ro.r('predict(cbfit, type="lp")')
+        marker_coxBoost = ro.r('predict(cbfit, X_test, '
+                               'Y_test, delta_test, type="lp")')
+
+        c_index_coxBoost = concordance_index(Y_test, marker_coxBoost[0],
+                                             delta_test)
         c_index_coxBoost = max(c_index_coxBoost, 1 - c_index_coxBoost)
+
+        predictions = estim_proba(marker_coxBoost[0], lp_train[0], Y_train, delta_train)
+        ibs_coxBoost = integrated_brier_score(predictions['values'],
+                                           predictions['times'],
+                                           Y_test, delta_test, Y_train,
+                                           delta_train)
 
         print("Train RSF...")
         ro.r('data_train <- as.data.frame(X)')
@@ -263,25 +297,36 @@ for cancer in cancers:
         ro.r('data_test["status"] <- delta_test')
         ro.r('rsf <- rfsrc(Surv(time, status) ~ ., data=data_train, '
              'ntree=200)')
-        ro.r('rsf.pred <- predict(rsf, data_test)$predicted')
-        c_index_rsf = ro.r('randomForestSRC:::cindex(Y_test, delta_test, '
-                           'rsf.pred)')
-        c_index_rsf = max(c_index_rsf[0], 1 - c_index_rsf[0])
+        ro.r('rsf.pred <- predict(rsf, data_test)')
+        marker_rsf = ro.r('rsf.pred$predicted')
+        c_index_rsf = concordance_index(Y_test, marker_rsf, delta_test)
+        c_index_rsf = max(c_index_rsf, 1 - c_index_rsf)
 
-        tmp = np.array([[cancer, 'Continuous data', c_index_continuous],
-                        [cancer, 'Binacox', c_index_bina],
-                        [cancer, 'MT-B', c_index_MT_B],
-                        [cancer, 'MT-LS', c_index_MT_LS],
-                        [cancer, 'CoxBoost', c_index_coxBoost],
-                        [cancer, 'RSF', c_index_rsf]]
-                       )
+        pred_survival = ro.r('rsf.pred$survival')
+        pred_times = ro.r('rsf.pred$time.interest')
+        ibs_rsf = integrated_brier_score(pred_survival.T, pred_times, Y_test, delta_test,
+                               Y_train, delta_train)
+
+        tmp = np.array(
+            [[cancer, 'Continuous data', c_index_continuous, ibs_cox],
+             [cancer, 'Binacox', c_index_bina, ibs_bina],
+             [cancer, 'MT-B', c_index_MT_B, ibs_MT_B],
+             [cancer, 'MT-LS', c_index_MT_LS, ibs_MT_LS],
+             [cancer, 'CoxBoost', c_index_coxBoost, ibs_coxBoost],
+             [cancer, 'RSF', c_index_rsf, ibs_rsf]]
+            )
 
         result = result.append(pd.DataFrame(tmp, columns=columns))
+
+        if b % 10 == 0:
+            result.to_excel("./result.xlsx", index=False)
 
 os.system('say "computation finished"')
 
 #################
 # get final result
+
+result.to_excel("./result.xlsx", index=False)
 
 mean_res = result.groupby(['Cancer', 'Model']).mean()
 mean_res.columns = ['C-index mean']
@@ -289,4 +334,4 @@ std_res = result.groupby(['Cancer', 'Model']).std()
 std_res.columns = ['C-index std']
 
 final_result = pd.concat((mean_res, std_res), axis=1)
-final_result.to_excel("./risk_prediction_results.xlsx") 
+final_result.to_excel("./risk_prediction_results.xlsx", index=False)

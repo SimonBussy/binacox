@@ -341,7 +341,8 @@ def refit_and_predict(cut_points_estimates, X_train, X_test, Y_train,
     learner.fit(X_bin_train, Y_train, delta_train)
     coeffs = learner.coeffs
     marker = X_bin_test.dot(coeffs)
+    lp_train = X_bin_train.dot(coeffs)
     c_index = concordance_index(Y_test, marker, delta_test)
     c_index = max(c_index, 1 - c_index)
 
-    return c_index
+    return c_index, marker, lp_train
